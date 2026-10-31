@@ -23,7 +23,7 @@ Dashboard: https://olist-e-commerce-dashboard-app-g5f9nfvsqeybq2hzu9nqfz.streaml
 This project was developed and tested using Python 3.14.2.
 
 ```shell
-git clone https://github.com/thcos/olist-e-commerce-dashboard-streamlit.git
+git clone https://github.com/thcos/Olist-E-Commerce-Data-Analysis-and-Visualization.git
 cd olist-e-commerce-dashboard-streamlit
 
 conda create --name main-ds python=3.12
@@ -36,7 +36,7 @@ pip install -r requirements.txt
 This project was developed and tested using Python 3.14.2.
 
 ```shell
-git clone https://github.com/thcos/olist-e-commerce-dashboard-streamlit.git
+git clone https://github.com/thcos/Olist-E-Commerce-Data-Analysis-and-Visualization.git
 cd olist-e-commerce-dashboard-streamlit
 
 python -m venv .venv
