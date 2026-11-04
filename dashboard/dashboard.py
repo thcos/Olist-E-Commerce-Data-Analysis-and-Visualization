@@ -4,13 +4,28 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import matplotlib.patheffects as pe
 from matplotlib.colors import LinearSegmentedColormap
-import seaborn as sns 
+import seaborn as sns
 import streamlit as st
 from babel.numbers import format_currency
-import geopandas as gdp
+import geopandas as gpd
+from pathlib import Path
+import io
 
 sns.set(style='dark')
 st.set_page_config(page_title="Olist Dashboard", layout="wide")
+
+# folder tempat dashboard.py berada (agar path data benar dari folder mana pun aplikasi dijalankan)
+BASE_DIR = Path(__file__).parent
+
+# resolusi gambar grafik di dashboard (lebih kecil = halaman lebih ringan)
+PLOT_DPI = 110
+
+# tampilkan figure sebagai gambar PNG beresolusi PLOT_DPI
+# (st.pyplot selalu memakai dpi=200 dan tidak lagi menerima argumen savefig)
+def show_fig(fig):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=PLOT_DPI, bbox_inches="tight")
+    st.image(buf)
 
 # formatter
 fmt_num = ticker.FuncFormatter(lambda x, pos: f"{x:,.0f}")
@@ -24,7 +39,7 @@ def brl(value):
 
 # MENYIAPKAN DATAFRAME
 
-# GMV dan jumlah order unik per bulan (Pertanyaan 1 dan 3)
+# GMV dan jumlah order unik per bulan (Pertanyaan 1 dan 2)
 def create_monthly_df(df):
     monthly_df = df.resample(rule="MS", on="order_purchase_timestamp").agg({
         "order_id":"nunique",
@@ -39,7 +54,7 @@ def create_monthly_df(df):
     monthly_df["mom_growth"] = monthly_df["order_count"].pct_change() * 100
     return monthly_df
 
-# Jumlah item terjual, jumlah order, dan GMV per kategori (Pertanyaan 2)
+# Jumlah item terjual, jumlah order, dan GMV per kategori (Pertanyaan 3)
 def create_category_df(df):
     category_df = df.groupby(by="product_category_eng").agg(
         total_items=("order_id", "count"),
@@ -114,20 +129,23 @@ def create_rfm_df(df):
         rfm_df["segment"] = np.select(conditions, choices, default="Need Attention")
     return rfm_df
 
-# LOAD DATA
+# LOAD DATA (hanya kolom yang dipakai, dan di-cache agar tidak dibaca ulang setiap interaksi)
+USECOLS = ["order_id", "order_purchase_timestamp", "price", "customer_unique_id",
+           "customer_state", "seller_id", "seller_state", "product_category_eng"]
 
+@st.cache_data
 def load_data(path):
-    df = pd.read_csv(path)
-    df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
-    df.sort_values(by="order_purchase_timestamp", inplace=True)
+    df = pd.read_csv(path, usecols=USECOLS, parse_dates=["order_purchase_timestamp"])
+    df.sort_values("order_purchase_timestamp", inplace=True)
     df.reset_index(drop=True, inplace=True)
     return df
 
+@st.cache_data
 def load_states(path):
-    return gdp.read_file(path)
+    return gpd.read_file(path)
 
-all_df = load_data("all_data.csv")
-brazil_states = load_states("brazil_states.geojson")
+all_df = load_data(BASE_DIR / "all_data.csv")
+brazil_states = load_states(BASE_DIR / "brazil_states.geojson")
 
 # Komponen Filter Data
 min_date = all_df["order_purchase_timestamp"].min().date()
@@ -201,7 +219,7 @@ ax.set_ylabel("Total Orders", fontsize=14)
 ax.tick_params(axis="y", labelsize=14)
 ax.tick_params(axis="x", labelsize=12, rotation=45)
 ax.grid(True)
-st.pyplot(fig)
+show_fig(fig)
 plt.close(fig)
 
 with st.expander("Lihat pertumbuhan jumlah transaksi dari bulan ke bulan (MoM)"):
@@ -218,10 +236,10 @@ with st.expander("Lihat pertumbuhan jumlah transaksi dari bulan ke bulan (MoM)")
         ax.set_ylabel("Pertumbuhan (%)", fontsize=12)
         ax.tick_params(axis="x", labelsize=11, rotation=45)
         ax.grid(True)
-        st.pyplot(fig)
+        show_fig(fig)
         plt.close(fig)
 
-# ---- Pertanyaan 1 : GMV
+# ---- Pertanyaan 2 : GMV
 st.subheader("Monthly Gross Merchandise Value (GMV)")
 fig, ax = plt.subplots(figsize=(16, 6))
 ax.plot(monthly_df["month"], monthly_df["gmv"], marker="o", linewidth=2, color="#2440a3")
@@ -241,7 +259,7 @@ ax.set_ylabel("GMV (BRL)", fontsize=14)
 ax.tick_params(axis="y", labelsize=14)
 ax.tick_params(axis="x", labelsize=12, rotation=45)
 ax.grid(True)
-st.pyplot(fig)
+show_fig(fig)
 plt.close(fig)
 
 # GMV vs Total Transaksi
@@ -270,7 +288,7 @@ ax1.grid(True)
 # Grafik 2: Total Orders (Sumbu Y kanan)
 ax2 = ax1.twinx()
 color2 = "#E67E22"
-ax2.set_ylabel("Total Orders", color=color, fontsize=12, fontweight="bold")
+ax2.set_ylabel("Total Orders", color=color2, fontsize=12, fontweight="bold")
 
 line2, = ax2.plot(
     monthly_df["month"],
@@ -283,6 +301,7 @@ line2, = ax2.plot(
 )
 ax2.yaxis.set_major_formatter(fmt_num)
 ax2.tick_params(axis="y", labelcolor=color2, labelsize=12)
+ax2.grid(False)
 
 ax1.legend(
     handles=[line1, line2],
@@ -291,42 +310,51 @@ ax1.legend(
     fontsize=11
 )
 fig.tight_layout()
-st.pyplot(fig)
+show_fig(fig)
 plt.close(fig)
 
 # Indeks: GMV, Total Orders, GMV per Order
 st.subheader("Monthly Growth Index: GMV, Total Orders, and GMV per Order")
-base_label = monthly_df["month"].iloc[0]
-st.caption(f"Tiap metrik dibagi nilainya pada bulan pertama ({base_label}) lalu dikali 100, sehingga bulan pertama = 100.")
-COLOR_GMV, COLOR_ORDERS, COLOR_AOV = "#2440a3", "#E67E22", "#5f7bde"
 
-index_cols = {"gmv": "GMV", "order_count": "Total Orders", "gmv_per_order": "GMV per Order"}
-idx_df = monthly_df.set_index("month")[list(index_cols)]
-idx_df = (idx_df / idx_df.iloc[0] * 100).rename(columns=index_cols)
- 
-fig, ax = plt.subplots(figsize=(14, 6))
-for nama, warna in [("GMV", COLOR_GMV), ("Total Orders", COLOR_ORDERS), ("GMV per Order", COLOR_AOV)]:
-    ax.plot(idx_df.index, idx_df[nama], marker="o", markersize=4, linewidth=2, color=warna, label=nama)
-    ax.annotate(
-        f"{idx_df[nama].iloc[-1]:,.0f}",
-        xy=(idx_df.index[-1], idx_df[nama].iloc[-1]),
-        xytext=(8, 0), textcoords="offset points",
-        va="center", fontsize=10, color=warna, fontweight="bold",
-    )
- 
-ax.axhline(100, color="black", linewidth=0.8, linestyle=":")
-ax.set_xlabel("Bulan (Tahun-Bulan)", fontsize=12)
-ax.set_ylabel("Indeks", fontsize=12)
-ax.yaxis.set_major_formatter(fmt_num)
-ax.tick_params(axis="x", rotation=45)
-plt.setp(ax.get_xticklabels(), ha="right")
-ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-ax.legend(loc="upper left", fontsize=11)
-ax.margins(x=0.06)
-plt.tight_layout()
-st.pyplot(fig)
-plt.close(fig)
- 
+# basis indeks = Januari 2017 (volume 2016 terlalu kecil untuk dijadikan patokan)
+idx_src = monthly_df[monthly_df["order_purchase_timestamp"] >= "2017-01-01"]
+if idx_src.empty:    # rentang yang dipilih seluruhnya sebelum 2017
+    idx_src = monthly_df
+
+if len(idx_src) < 2 or idx_src["order_count"].iloc[0] == 0:
+    st.info("Data tidak cukup untuk menghitung indeks pertumbuhan pada rentang ini.")
+else:
+    base_label = idx_src["month"].iloc[0]
+    st.caption(f"Tiap metrik dibagi nilainya pada bulan pertama ({base_label}) lalu dikali 100, sehingga bulan pertama = 100.")
+    COLOR_GMV, COLOR_ORDERS, COLOR_AOV = "#2440a3", "#E67E22", "#5f7bde"
+
+    index_cols = {"gmv": "GMV", "order_count": "Total Orders", "gmv_per_order": "GMV per Order"}
+    idx_df = idx_src.set_index("month")[list(index_cols)]
+    idx_df = (idx_df / idx_df.iloc[0] * 100).rename(columns=index_cols)
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for nama, warna in [("GMV", COLOR_GMV), ("Total Orders", COLOR_ORDERS), ("GMV per Order", COLOR_AOV)]:
+        ax.plot(idx_df.index, idx_df[nama], marker="o", markersize=4, linewidth=2, color=warna, label=nama)
+        ax.annotate(
+            f"{idx_df[nama].iloc[-1]:,.0f}",
+            xy=(idx_df.index[-1], idx_df[nama].iloc[-1]),
+            xytext=(8, 0), textcoords="offset points",
+            va="center", fontsize=10, color=warna, fontweight="bold",
+        )
+
+    ax.axhline(100, color="black", linewidth=0.8, linestyle=":")
+    ax.set_xlabel("Bulan (Tahun-Bulan)", fontsize=12)
+    ax.set_ylabel("Indeks", fontsize=12)
+    ax.yaxis.set_major_formatter(fmt_num)
+    ax.tick_params(axis="x", rotation=45)
+    plt.setp(ax.get_xticklabels(), ha="right")
+    ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    ax.legend(loc="upper left", fontsize=11)
+    ax.margins(x=0.06)
+    plt.tight_layout()
+    show_fig(fig)
+    plt.close(fig)
+
 
 # ---- Pertanyaan 3: Kategori Produk
 st.subheader("Best & Worst Performing Product Category")
@@ -369,7 +397,7 @@ for value_col, title_best, title_worst, xlabel, formatter in category_config:
         a.tick_params(axis="y", labelsize=11)
         a.margins(x=0.15)
     plt.tight_layout()
-    st.pyplot(fig)
+    show_fig(fig)
     plt.close(fig)
 
 # ---- Pertanyaan 4: Geospasial Analiysis
@@ -418,7 +446,7 @@ for suptitle, panels in map_figures:
 
     plt.suptitle(suptitle, fontsize=16)
     plt.tight_layout()
-    st.pyplot(fig)
+    show_fig(fig)
     plt.close(fig)
 
 # melihat ketimpangan seller vs customer
@@ -449,7 +477,7 @@ with col3:
     st.metric("Average Monetary", value=avg_monetary)
 
 # top 5 customer masing-masing parameter
-fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(35, 15))
+fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(24, 7))
 colors = ["#2440a3", "#2440a3", "#2440a3", "#2440a3", "#2440a3"]
 
 rfm_config = [
@@ -463,13 +491,13 @@ for a, column, ascending, title in rfm_config:
     top["customer_short"] = top["customer_unique_id"].str[:8]
     sns.barplot(y=column, x="customer_short", data=top, hue="customer_short", palette=colors, legend=False, ax=a)
     a.set_ylabel(None)
-    a.set_xlabel("customer_unique_id", fontsize=30)
-    a.set_title(title, loc="center", fontsize=30)
-    a.tick_params(axis="y", labelsize=30)
-    a.tick_params(axis="x", labelsize=30, rotation=45)
+    a.set_xlabel("customer_unique_id", fontsize=14)
+    a.set_title(title, loc="center", fontsize=20)
+    a.tick_params(axis="y", labelsize=14)
+    a.tick_params(axis="x", labelsize=12, rotation=45)
 
 plt.tight_layout()
-st.pyplot(fig)
+show_fig(fig)
 plt.close(fig)
 
 if "rfm_total" in rfm_df.columns:
@@ -506,10 +534,11 @@ if "rfm_total" in rfm_df.columns:
     ax.grid(axis="x", linestyle="--", alpha=0.5)
     ax.set_axisbelow(True)
 
+    plt.tight_layout()
+    show_fig(fig)
+    plt.close(fig)
+
 else:
     st.info("Data terlalu sedikit (kurang dari 5 pelanggan) untuk menghitung segmentasi RFM.")
-plt.tight_layout()
-st.pyplot(fig)
-plt.close(fig)
 
 st.caption("Olist E-Commerce Dashboard")
